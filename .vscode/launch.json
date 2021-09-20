@@ -9,18 +9,17 @@
       "type": "coreclr",
       "request": "launch",
       "preLaunchTask": "build",
-      // If you have changed target frameworks, make sure to update the program path.
-      "program": "${workspaceFolder}/src/WebJobs.Script.WebHost/bin/Debug/netcoreapp2.2/Microsoft.Azure.WebJobs.Script.WebHost.dll",
+      "program": "${workspaceFolder}/src/WebJobs.Script.WebHost/bin/Debug/netcoreapp3.1/Microsoft.Azure.WebJobs.Script.WebHost.dll",
       "args": [],
-      "cwd": "${workspaceFolder}/sample/Node",
+      "cwd": "${workspaceFolder}/sample/Python",
       "stopAtEntry": false,
-      // Enable launching a web browser when ASP.NET Core starts. For more information: https://aka.ms/VSCode-CS-LaunchJson-WebBrowser
       "serverReadyAction": {
         "action": "openExternally",
         "pattern": "^\\s*Now listening on:\\s+(https?://\\S+)"
       },
       "env": {
-        "ASPNETCORE_ENVIRONMENT": "Development"
+        "AZURE_FUNCTIONS_ENVIRONMENT": "Development",
+        "ASPNETCORE_ENVIRONMENT": "Development",
       },
       "sourceFileMap": {
         "/Views": "${workspaceFolder}/Views"
@@ -31,6 +30,15 @@
       "type": "coreclr",
       "request": "attach",
       "processId": "${command:pickProcess}"
-    }
+    },
+    {
+      "name": "Docker .NET Core Attach (Preview)",
+      "type": "docker",
+      "request": "attach",
+      "platform": "netCore",
+      "sourceFileMap": {
+        "/src": "${workspaceFolder}"
+      }
+    },
   ]
 }

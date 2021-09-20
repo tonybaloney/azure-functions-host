@@ -1,0 +1,14 @@
+version: "3.8"
+services:
+  azure-functions-host:
+    image: azure-functions-host
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - 9090:80
+    volumes:
+      - ./sample/Python:/home/site/wwwroot
+    environment:
+      FUNCTIONS_WORKER_RUNTIME: python
+
