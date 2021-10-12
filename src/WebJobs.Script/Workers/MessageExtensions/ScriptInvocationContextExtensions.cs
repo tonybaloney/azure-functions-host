@@ -4,6 +4,7 @@
 using System;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Azure.WebJobs.Host;
 using Microsoft.Azure.WebJobs.Script.Description;
 using Microsoft.Azure.WebJobs.Script.Extensions;
 using Microsoft.Azure.WebJobs.Script.Workers.Http;
@@ -48,6 +49,15 @@ namespace Microsoft.Azure.WebJobs.Script.Workers
                 httpScriptInvocationContext.Data[input.name] = GetHttpScriptInvocationContextValue(input.val, input.type);
             }
 
+            // add retry context
+            if (scriptInvocationContext.ExecutionContext.RetryContext != null)
+            {
+                httpScriptInvocationContext.Metadata["RetryContext"] = new RetryContext() // TO DO - constant
+                {
+                    RetryCount = scriptInvocationContext.ExecutionContext.RetryContext.RetryCount,
+                    MaxRetryCount = scriptInvocationContext.ExecutionContext.RetryContext.MaxRetryCount
+                };
+            }
             return httpScriptInvocationContext;
         }
 
