@@ -29,3 +29,4 @@ TestResults/
 
 local.settings.json
 msbuild.binlog
+/.github/notebooks/sprint.github-issues

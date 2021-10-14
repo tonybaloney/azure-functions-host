@@ -49,15 +49,7 @@ namespace Microsoft.Azure.WebJobs.Script.Workers
                 httpScriptInvocationContext.Data[input.name] = GetHttpScriptInvocationContextValue(input.val, input.type);
             }
 
-            // add retry context
-            if (scriptInvocationContext.ExecutionContext.RetryContext != null)
-            {
-                httpScriptInvocationContext.Metadata["RetryContext"] = new RetryContext() // TO DO - constant
-                {
-                    RetryCount = scriptInvocationContext.ExecutionContext.RetryContext.RetryCount,
-                    MaxRetryCount = scriptInvocationContext.ExecutionContext.RetryContext.MaxRetryCount
-                };
-            }
+            SetRetryContext(scriptInvocationContext, httpScriptInvocationContext);
             return httpScriptInvocationContext;
         }
 
@@ -87,6 +79,25 @@ namespace Microsoft.Azure.WebJobs.Script.Workers
             {
             }
             return JsonConvert.SerializeObject(inputValue);
+        }
+
+        internal static void SetRetryContext(this ScriptInvocationContext scriptInvocationContext, HttpScriptInvocationContext httpScriptInvocationContext)
+        {
+            if (scriptInvocationContext.ExecutionContext.RetryContext != null)
+            {
+                RetryContext retryContext = new RetryContext() // TO DO - constant
+                {
+                    RetryCount = scriptInvocationContext.ExecutionContext.RetryContext.RetryCount,
+                    MaxRetryCount = scriptInvocationContext.ExecutionContext.RetryContext.MaxRetryCount
+                };
+
+                if (scriptInvocationContext.ExecutionContext.RetryContext.Exception != null)
+                {
+                    retryContext.Exception = new Exception(scriptInvocationContext.ExecutionContext.RetryContext.Exception.ToString());
+                }
+
+                httpScriptInvocationContext.Metadata["RetryContext"] = retryContext;
+            }
         }
     }
 }
