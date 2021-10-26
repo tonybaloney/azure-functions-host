@@ -85,18 +85,7 @@ namespace Microsoft.Azure.WebJobs.Script.Workers
         {
             if (scriptInvocationContext.ExecutionContext.RetryContext != null)
             {
-                RetryContext retryContext = new RetryContext() // TO DO - constant
-                {
-                    RetryCount = scriptInvocationContext.ExecutionContext.RetryContext.RetryCount,
-                    MaxRetryCount = scriptInvocationContext.ExecutionContext.RetryContext.MaxRetryCount
-                };
-
-                if (scriptInvocationContext.ExecutionContext.RetryContext.Exception != null)
-                {
-                    retryContext.Exception = new Exception(scriptInvocationContext.ExecutionContext.RetryContext.Exception.ToString());
-                }
-
-                httpScriptInvocationContext.Metadata["RetryContext"] = retryContext;
+                httpScriptInvocationContext.Metadata["RetryContext"] = scriptInvocationContext.ExecutionContext.RetryContext;
             }
         }
     }
