@@ -1,4 +1,4 @@
-﻿using Microsoft.Azure.WebJobs.Script.Config;
+﻿ using Microsoft.Azure.WebJobs.Script.Config;
 using Microsoft.Azure.WebJobs.Script.Tests.EndToEnd;
 using Microsoft.Azure.WebJobs.Script.Workers.Rpc;
 using Newtonsoft.Json.Linq;
