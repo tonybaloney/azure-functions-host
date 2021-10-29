@@ -360,7 +360,6 @@ EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "HttpTrigger", "HttpTrigger", "{C4849B2D-031E-441E-8F67-52E462BB8C71}"
 	ProjectSection(SolutionItems) = preProject
 		sample\CustomHandlerRetry\HttpTrigger\function.json = sample\CustomHandlerRetry\HttpTrigger\function.json
-		sample\CustomHandlerRetry\HttpTrigger\index.js = sample\CustomHandlerRetry\HttpTrigger\index.js
 	EndProjectSection
 EndProject
 Global

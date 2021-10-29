@@ -32,7 +32,7 @@ namespace Microsoft.Azure.WebJobs.Script.Tests.Integration.WebHostEndToEnd
             string body = await response.Content.ReadAsStringAsync();
             JObject res = JObject.Parse(body);
             Assert.True(res["functionName"].ToString().StartsWith($"api/HttpTrigger"));
-            Assert.Equal(res["retryCount: 4"], body);
+            Assert.Equal(res["retryCount"], "0");
         }
 
         public class TestFixture : EndToEndTestFixture
@@ -47,5 +47,16 @@ namespace Microsoft.Azure.WebJobs.Script.Tests.Integration.WebHostEndToEnd
                 base.ConfigureScriptHost(webJobsBuilder);
             }
         }
+
+        //private static async Task<HttpResponseMessage> InvokeHttpTrigger(string functionName)
+        //{
+        //    string functionKey = await _fixture.Host.GetFunctionSecretAsync($"{functionName}");
+        //    string uri = $"api/{functionName}";
+        //    HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, uri);
+        //    request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/plain"));
+
+        //    return await _fixture.Host.HttpClient.SendAsync(request);
+
+        //}
     }
 }
