@@ -13,6 +13,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Azure.Storage.Blobs;
 using Microsoft.Azure.WebJobs.Host.Executors;
+using Microsoft.Azure.WebJobs.Host.Storage;
 using Microsoft.Azure.WebJobs.Script.Description;
 using Microsoft.Azure.WebJobs.Script.Models;
 using Microsoft.Azure.WebJobs.Script.WebHost.Extensions;
@@ -59,11 +60,11 @@ namespace Microsoft.Azure.WebJobs.Script.WebHost.Management
         private readonly HostNameProvider _hostNameProvider;
         private readonly IFunctionMetadataManager _functionMetadataManager;
         private readonly SemaphoreSlim _syncSemaphore = new SemaphoreSlim(1, 1);
-        private readonly IAzureStorageProvider _azureStorageProvider;
+        private readonly IAzureBlobStorageProvider _azureBlobStorageProvider;
 
         private BlobClient _hashBlobClient;
 
-        public FunctionsSyncManager(IConfiguration configuration, IHostIdProvider hostIdProvider, IOptionsMonitor<ScriptApplicationHostOptions> applicationHostOptions, ILogger<FunctionsSyncManager> logger, IHttpClientFactory httpClientFactory, ISecretManagerProvider secretManagerProvider, IScriptWebHostEnvironment webHostEnvironment, IEnvironment environment, HostNameProvider hostNameProvider, IFunctionMetadataManager functionMetadataManager, IAzureStorageProvider azureStorageProvider)
+        public FunctionsSyncManager(IConfiguration configuration, IHostIdProvider hostIdProvider, IOptionsMonitor<ScriptApplicationHostOptions> applicationHostOptions, ILogger<FunctionsSyncManager> logger, IHttpClientFactory httpClientFactory, ISecretManagerProvider secretManagerProvider, IScriptWebHostEnvironment webHostEnvironment, IEnvironment environment, HostNameProvider hostNameProvider, IFunctionMetadataManager functionMetadataManager, IAzureBlobStorageProvider azureBlobStorageProvider)
         {
             _applicationHostOptions = applicationHostOptions;
             _logger = logger;
@@ -75,7 +76,7 @@ namespace Microsoft.Azure.WebJobs.Script.WebHost.Management
             _environment = environment;
             _hostNameProvider = hostNameProvider;
             _functionMetadataManager = functionMetadataManager;
-            _azureStorageProvider = azureStorageProvider;
+            _azureBlobStorageProvider = azureBlobStorageProvider;
         }
 
         internal bool ArmCacheEnabled
@@ -104,6 +105,8 @@ namespace Microsoft.Azure.WebJobs.Script.WebHost.Management
             try
             {
                 await _syncSemaphore.WaitAsync();
+
+                PrepareSyncTriggers();
 
                 var hashBlobClient = await GetHashBlobAsync();
                 if (isBackgroundSync && hashBlobClient == null && !_environment.IsKubernetesManagedHosting())
@@ -157,6 +160,28 @@ namespace Microsoft.Azure.WebJobs.Script.WebHost.Management
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// SyncTriggers is performed whenever deployments or other changes are made to the application.
+        /// There are some operations we want to perform whenever this happens.
+        /// </summary>
+        private void PrepareSyncTriggers()
+        {
+            // We clear cache to ensure that secrets are reloaded. This is important because secrets are part
+            // of the StartupContext payload (see StartupContextProvider) and that payload comes from the
+            // SyncTriggers operation. So there's a chicken and egg situation here. Consider the following scenario:
+            //   - app is using blob storage for keys
+            //   - a SyncTriggers operation has happened previously and the StartupContext has key info
+            //   - app instances initialize keys from StartupContext (keys aren't loaded from storage)
+            //   - user updates the app to use a new storage account
+            //   - a SyncTriggers operation is performed
+            //   - the app initializes from StartupContext, and **previous old key info is loaded**
+            //   - the SyncTriggers operation uses this old key info, so trigger cache is never updated with new key info
+            //   - Portal/ARM APIs will continue to show old key info.
+            // By clearing cache, we ensure that this host instance reloads keys when they're requested, and the SyncTriggers
+            // operation will contain current keys.
+            _secretManagerProvider.Current.ClearCache();
         }
 
         internal static bool IsSyncTriggersEnvironment(IScriptWebHostEnvironment webHostEnvironment, IEnvironment environment)
@@ -262,7 +287,7 @@ namespace Microsoft.Azure.WebJobs.Script.WebHost.Management
         {
             if (_hashBlobClient == null)
             {
-                if (_azureStorageProvider.TryGetBlobServiceClientFromConnection(out BlobServiceClient blobClient, ConnectionStringNames.Storage))
+                if (_azureBlobStorageProvider.TryCreateBlobServiceClientFromConnection(ConnectionStringNames.Storage, out BlobServiceClient blobClient))
                 {
                     string hostId = await _hostIdProvider.GetHostIdAsync(CancellationToken.None);
                     var blobContainerClient = blobClient.GetBlobContainerClient(ScriptConstants.AzureWebJobsHostsContainerName);
