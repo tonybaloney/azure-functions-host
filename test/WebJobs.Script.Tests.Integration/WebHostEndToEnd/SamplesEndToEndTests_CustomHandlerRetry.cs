@@ -7,6 +7,7 @@ using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Text;
 using System.Threading.Tasks;
 using Xunit;
 
@@ -27,12 +28,12 @@ namespace Microsoft.Azure.WebJobs.Script.Tests.Integration.WebHostEndToEnd
         [Fact]
         public async Task CustomHandlerRetry_Get_Succeeds()
         {
-            var response = await SamplesTestHelpers.InvokeHttpTrigger(_fixture, "HttpTrigger");
+            var response = await InvokeHttpTriggerCustomHandlerRetry("HttpTrigger");
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             string body = await response.Content.ReadAsStringAsync();
             JObject res = JObject.Parse(body);
             Assert.True(res["functionName"].ToString().StartsWith($"api/HttpTrigger"));
-            Assert.Equal(res["retryCount"], "0");
+            Assert.Equal(res["retryCount"], "4");
         }
 
         public class TestFixture : EndToEndTestFixture
@@ -48,15 +49,14 @@ namespace Microsoft.Azure.WebJobs.Script.Tests.Integration.WebHostEndToEnd
             }
         }
 
-        //private static async Task<HttpResponseMessage> InvokeHttpTrigger(string functionName)
-        //{
-        //    string functionKey = await _fixture.Host.GetFunctionSecretAsync($"{functionName}");
-        //    string uri = $"api/{functionName}";
-        //    HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, uri);
-        //    request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/plain"));
-
-        //    return await _fixture.Host.HttpClient.SendAsync(request);
-
-        //}
+        private async Task<HttpResponseMessage> InvokeHttpTriggerCustomHandlerRetry(string functionName)
+        {
+            string functionKey = await _fixture.Host.GetFunctionSecretAsync($"{functionName}");
+            string uri = $"api/{functionName}";
+            HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Get, uri);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/plain"));
+            request.Content = new StringContent("{\n  \"Data\": {\n    \"myQueueItem\": \"{ message: \\\"Message sent\\\" }\"\n  },\n  \"Metadata\": {\n    \"RetryContext\": {\n        \"RetryCount\": \"4\",\n        \"Exception\" : {\n            \"message\":\"An error occurred\"\n        } , \n        \"MaxRetryCount\": \"4\"\n    }\n  }\n}", Encoding.UTF8, "application/json");
+            return await _fixture.Host.HttpClient.SendAsync(request);
+        }
     }
 }
