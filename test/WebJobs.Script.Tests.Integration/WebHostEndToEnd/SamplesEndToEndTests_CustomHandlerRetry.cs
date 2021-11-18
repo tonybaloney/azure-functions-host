@@ -55,7 +55,9 @@ namespace Microsoft.Azure.WebJobs.Script.Tests.Integration.WebHostEndToEnd
             string uri = $"api/{functionName}";
             HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Get, uri);
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/plain"));
-            request.Content = new StringContent("{\n  \"Data\": {\n    \"myQueueItem\": \"{ message: \\\"Message sent\\\" }\"\n  },\n  \"Metadata\": {\n    \"RetryContext\": {\n        \"RetryCount\": \"4\",\n        \"Exception\" : {\n            \"message\":\"An error occurred\"\n        } , \n        \"MaxRetryCount\": \"4\"\n    }\n  }\n}", Encoding.UTF8, "application/json");
+            request.Content = new StringContent("{\n  \"Data\": {\n    \"myQueueItem\": \"{ message: \\\"Message sent\\\" }\"\n  },\n  \"Metadata\": {\n    " +
+                "\"RetryContext\": {\n        \"RetryCount\": \"4\",\n        \"Exception\" : {\n            \"message\":\"An error occurred\"\n        } , \n        " +
+                "\"MaxRetryCount\": \"4\"\n    }\n  }\n}", Encoding.UTF8, "application/json");
             return await _fixture.Host.HttpClient.SendAsync(request);
         }
     }
