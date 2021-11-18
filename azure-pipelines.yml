@@ -297,6 +297,12 @@ jobs:
         **\WebJobs.Script.Scaling.Tests.csproj
         **\WebJobs.Script.Tests.csproj
 
+  - task: Npm@1
+    displayName: 'npm ci'
+    inputs:
+      command: ci
+      workingDir: sample/CustomHandlerRetry
+
 - job: RunNonE2EIntegrationTests
   pool:
     vmImage: 'windows-2019'
@@ -470,12 +476,6 @@ jobs:
       arguments: '--filter "Group=RawAssemblyEndToEndTests" --no-build'
       projects: |
         **\WebJobs.Script.Tests.Integration.csproj
-    
-  - task: Npm@1
-    displayName: 'npm ci'
-    inputs:
-      command: ci
-      workingDir: sample/CustomHandlerRetry
 
   - task: DotNetCoreCLI@2
     displayName: "Samples end to end tests"
