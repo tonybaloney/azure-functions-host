@@ -6,7 +6,7 @@
     "delayInterval": "00:00:03"
   },
   "customHandler": {
-    "enableForwardingHttpRequest": true,
+    "enableForwardingHttpRequest": false,
     "description": {
       "defaultExecutablePath": "node",
       "arguments": [ "server.js" ]
