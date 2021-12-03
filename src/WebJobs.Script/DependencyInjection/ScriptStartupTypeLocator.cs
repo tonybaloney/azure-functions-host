@@ -3,6 +3,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -14,7 +15,9 @@ using Microsoft.Azure.WebJobs.Script.Diagnostics.Extensions;
 using Microsoft.Azure.WebJobs.Script.ExtensionBundle;
 using Microsoft.Azure.WebJobs.Script.ExtensionRequirements;
 using Microsoft.Azure.WebJobs.Script.Models;
+using Microsoft.Azure.WebJobs.Script.Workers.Rpc;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
@@ -26,35 +29,29 @@ namespace Microsoft.Azure.WebJobs.Script.DependencyInjection
     /// </summary>
     public class ScriptStartupTypeLocator : IWebJobsStartupTypeLocator
     {
+        private const string ApplicationInsightsStartupType = "Microsoft.Azure.WebJobs.Extensions.ApplicationInsights.ApplicationInsightsWebJobsStartup, Microsoft.Azure.WebJobs.Extensions.ApplicationInsights, Version=1.0.0.0, Culture=neutral, PublicKeyToken=9475d07f10cb09df";
+
         private readonly string _rootScriptPath;
-        private readonly IEnvironment _environment;
         private readonly ILogger _logger;
         private readonly IExtensionBundleManager _extensionBundleManager;
         private readonly IFunctionMetadataManager _functionMetadataManager;
         private readonly IMetricsLogger _metricsLogger;
-        private readonly bool _isSelfHost;
         private readonly Lazy<IEnumerable<Type>> _startupTypes;
+        private readonly IOptions<LanguageWorkerOptions> _languageWorkerOptions;
 
         private static readonly ExtensionRequirementsInfo _extensionRequirements = DependencyHelper.GetExtensionRequirements();
         private static string[] _builtinExtensionAssemblies = GetBuiltinExtensionAssemblies();
 
-        public ScriptStartupTypeLocator(
-            string rootScriptPath,
-            IEnvironment environment,
-            ILogger<ScriptStartupTypeLocator> logger,
-            IExtensionBundleManager extensionBundleManager,
-            IFunctionMetadataManager functionMetadataManager,
-            IMetricsLogger metricsLogger,
-            bool isSelfHost = false)
+        public ScriptStartupTypeLocator(string rootScriptPath, ILogger<ScriptStartupTypeLocator> logger, IExtensionBundleManager extensionBundleManager,
+            IFunctionMetadataManager functionMetadataManager, IMetricsLogger metricsLogger, IOptions<LanguageWorkerOptions> languageWorkerOptions)
         {
             _rootScriptPath = rootScriptPath ?? throw new ArgumentNullException(nameof(rootScriptPath));
-            _environment = environment;
             _extensionBundleManager = extensionBundleManager ?? throw new ArgumentNullException(nameof(extensionBundleManager));
             _logger = logger;
             _functionMetadataManager = functionMetadataManager;
             _metricsLogger = metricsLogger;
-            _isSelfHost = isSelfHost;
             _startupTypes = new Lazy<IEnumerable<Type>>(() => GetExtensionsStartupTypesAsync().ConfigureAwait(false).GetAwaiter().GetResult());
+            _languageWorkerOptions = languageWorkerOptions;
         }
 
         private static string[] GetBuiltinExtensionAssemblies()
@@ -77,17 +74,24 @@ namespace Microsoft.Azure.WebJobs.Script.DependencyInjection
 
         public async Task<IEnumerable<Type>> GetExtensionsStartupTypesAsync()
         {
-            string extensionsPath;
-            var functionMetadataCollection = _functionMetadataManager.GetFunctionMetadata(forceRefresh: true, includeCustomProviders: false);
+            string extensionsMetadataPath;
+            FunctionAssemblyLoadContext.ResetSharedContext();
+
             HashSet<string> bindingsSet = null;
             var bundleConfigured = _extensionBundleManager.IsExtensionBundleConfigured();
+            bool isLegacyExtensionBundle = _extensionBundleManager.IsLegacyExtensionBundle();
             bool isPrecompiledFunctionApp = false;
 
-            if (bundleConfigured)
+            // if workerIndexing
+            //      Function.json (httpTrigger, blobTrigger, blobTrigger)  -> httpTrigger, blobTrigger
+            // dotnet app precompiled -> Do not use bundles
+            var workerConfigs = _languageWorkerOptions.Value.WorkerConfigs;
+            if (bundleConfigured && !Utility.CanWorkerIndex(workerConfigs, SystemEnvironment.Instance))
             {
                 ExtensionBundleDetails bundleDetails = await _extensionBundleManager.GetExtensionBundleDetails();
                 ValidateBundleRequirements(bundleDetails);
 
+                var functionMetadataCollection = _functionMetadataManager.GetFunctionMetadata(forceRefresh: true, includeCustomProviders: false);
                 bindingsSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
                 // Generate a Hashset of all the binding types used in the function app
@@ -101,8 +105,6 @@ namespace Microsoft.Azure.WebJobs.Script.DependencyInjection
                 }
             }
 
-            bool isLegacyExtensionBundle = _extensionBundleManager.IsLegacyExtensionBundle();
-
             if (SystemEnvironment.Instance.IsPlaceholderModeEnabled())
             {
                 // Do not move this.
@@ -110,45 +112,59 @@ namespace Microsoft.Azure.WebJobs.Script.DependencyInjection
                 _logger.ScriptStartNotLoadingExtensionBundle("WARMUP_LOG_ONLY", bundleConfigured, isPrecompiledFunctionApp, isLegacyExtensionBundle);
             }
 
-            if (bundleConfigured && (!isPrecompiledFunctionApp || _extensionBundleManager.IsLegacyExtensionBundle()))
+            string baseProbingPath = null;
+
+            if (bundleConfigured && (!isPrecompiledFunctionApp || isLegacyExtensionBundle))
             {
-                extensionsPath = await _extensionBundleManager.GetExtensionBundleBinPathAsync();
-                if (string.IsNullOrEmpty(extensionsPath))
+                extensionsMetadataPath = await _extensionBundleManager.GetExtensionBundleBinPathAsync();
+                if (string.IsNullOrEmpty(extensionsMetadataPath))
                 {
                     _logger.ScriptStartUpErrorLoadingExtensionBundle();
                     return Array.Empty<Type>();
                 }
 
-                _logger.ScriptStartUpLoadingExtensionBundle(extensionsPath);
+                _logger.ScriptStartUpLoadingExtensionBundle(extensionsMetadataPath);
             }
             else
             {
-                extensionsPath = Path.Combine(_rootScriptPath, "bin");
+                extensionsMetadataPath = Path.Combine(_rootScriptPath, "bin");
 
-                if (!File.Exists(Path.Combine(extensionsPath, ScriptConstants.ExtensionsMetadataFileName)))
+                // Verify if the file exists and apply fallback paths
+                // The fallback order is:
+                //   1 - Script root
+                //       - If the system folder exists with metadata file at the root, use that as the base probing path
+                //   2 - System folder
+                if (!File.Exists(Path.Combine(extensionsMetadataPath, ScriptConstants.ExtensionsMetadataFileName)))
                 {
+                    string systemPath = Path.Combine(_rootScriptPath, ScriptConstants.AzureFunctionsSystemDirectoryName);
+
                     if (File.Exists(Path.Combine(_rootScriptPath, ScriptConstants.ExtensionsMetadataFileName)))
                     {
                         // As a fallback, allow extensions.json in the root path.
-                        extensionsPath = _rootScriptPath;
-                    }
-                    else
-                    {
-                        string systemPath = Path.Combine(_rootScriptPath, ScriptConstants.AzureFunctionsSystemDirectoryName);
-                        if (File.Exists(Path.Combine(systemPath, ScriptConstants.ExtensionsMetadataFileName)))
+                        extensionsMetadataPath = _rootScriptPath;
+
+                        // If the system path exists, that should take precedence as the base probing path
+                        if (Directory.Exists(systemPath))
                         {
-                            extensionsPath = systemPath;
+                            baseProbingPath = systemPath;
                         }
+                    }
+                    else if (File.Exists(Path.Combine(systemPath, ScriptConstants.ExtensionsMetadataFileName)))
+                    {
+                        extensionsMetadataPath = systemPath;
                     }
                 }
 
-                _logger.ScriptStartNotLoadingExtensionBundle(extensionsPath, bundleConfigured, isPrecompiledFunctionApp, isLegacyExtensionBundle);
+                _logger.ScriptStartNotLoadingExtensionBundle(extensionsMetadataPath, bundleConfigured, isPrecompiledFunctionApp, isLegacyExtensionBundle);
             }
 
-            // Reset the load context using the resolved extensions path
-            FunctionAssemblyLoadContext.ResetSharedContext(extensionsPath);
+            baseProbingPath ??= extensionsMetadataPath;
+            _logger.ScriptStartupResettingLoadContextWithBasePath(baseProbingPath);
 
-            string metadataFilePath = Path.Combine(extensionsPath, ScriptConstants.ExtensionsMetadataFileName);
+            // Reset the load context using the resolved extensions path
+            FunctionAssemblyLoadContext.ResetSharedContext(baseProbingPath);
+
+            string metadataFilePath = Path.Combine(extensionsMetadataPath, ScriptConstants.ExtensionsMetadataFileName);
 
             // parse the extensions file to get declared startup extensions
             ExtensionReference[] extensionItems = ParseExtensions(metadataFilePath);
@@ -157,7 +173,17 @@ namespace Microsoft.Azure.WebJobs.Script.DependencyInjection
 
             foreach (var extensionItem in extensionItems)
             {
-                if (!bundleConfigured || IsValidBindingMatch(extensionItem, bindingsSet, _environment))
+                // We need to explicitly ignore ApplicationInsights extension
+                if (extensionItem.TypeName.Equals(ApplicationInsightsStartupType, StringComparison.Ordinal))
+                {
+                    _logger.LogWarning("The Application Insights extension is no longer supported. Package references to Microsoft.Azure.WebJobs.Extensions.ApplicationInsights can be removed.");
+                    continue;
+                }
+
+                if (Utility.CanWorkerIndex(workerConfigs, SystemEnvironment.Instance)
+                    || !bundleConfigured
+                    || extensionItem.Bindings.Count == 0
+                    || extensionItem.Bindings.Intersect(bindingsSet, StringComparer.OrdinalIgnoreCase).Any())
                 {
                     string startupExtensionName = extensionItem.Name ?? extensionItem.TypeName;
                     _logger.ScriptStartUpLoadingStartUpExtension(startupExtensionName);
@@ -181,7 +207,7 @@ namespace Microsoft.Azure.WebJobs.Script.DependencyInjection
                             var hintUri = new Uri(path, UriKind.RelativeOrAbsolute);
                             if (!hintUri.IsAbsoluteUri)
                             {
-                                path = Path.Combine(extensionsPath, path);
+                                path = Path.Combine(extensionsMetadataPath, path);
                             }
 
                             if (File.Exists(path))
@@ -214,7 +240,6 @@ namespace Microsoft.Azure.WebJobs.Script.DependencyInjection
             }
 
             ValidateExtensionRequirements(startupTypes);
-            ValidateApplicationInsightsConfig(startupTypes, _isSelfHost, IsApplicationInsightsSettingPresent(_environment), bundleConfigured, _logger);
 
             return startupTypes;
         }
@@ -330,54 +355,6 @@ namespace Microsoft.Azure.WebJobs.Script.DependencyInjection
 
                 throw new HostInitializationException(builder.ToString());
             }
-        }
-
-        internal static bool IsValidBindingMatch(ExtensionReference extension, HashSet<string> bindingsSet, IEnvironment environment)
-        {
-            if (extension.Bindings.Count == 0)
-            {
-                return true;
-            }
-
-            // Application Insights uses a special binding value to ensure it's installed based on its App Setting
-            if (extension.Bindings.Any(b => b.Equals("_")))
-            {
-                return IsApplicationInsightsSettingPresent(environment);
-            }
-
-            return extension.Bindings.Intersect(bindingsSet, StringComparer.OrdinalIgnoreCase).Any();
-        }
-
-        internal static void ValidateApplicationInsightsConfig(List<Type> startupTypes, bool isSelfHost, bool isApplicationInsightsSettingPresent, bool isExtensionBundleConfigured, ILogger logger)
-        {
-            if (isSelfHost)
-            {
-                logger.LogWarning("In order to use Application Insights in Azure Functions V4 and above, please install the Application Insights Extension. " +
-                                  "See https://aka.ms/func-applicationinsights-extension for more details.");
-            }
-            else if (!isExtensionBundleConfigured)
-            {
-                bool applicationInsightsInstalled = startupTypes.Exists(t => t.Name.Equals("ApplicationInsightsWebJobsStartup"));
-                if (applicationInsightsInstalled && !isApplicationInsightsSettingPresent)
-                {
-                    throw new HostInitializationException($"The Application Insights Extension is installed but is not properly configured. " +
-                                                          $"Please define the \"{EnvironmentSettingNames.AppInsightsConnectionString}\" app setting.");
-                }
-                else if (!applicationInsightsInstalled && isApplicationInsightsSettingPresent)
-                {
-                    // this could break extension bundle apps depending on when application insights extension is
-                    // released in bundles, so ignore them.
-                    throw new HostInitializationException($"{EnvironmentSettingNames.AppInsightsConnectionString} or {EnvironmentSettingNames.AppInsightsInstrumentationKey} " +
-                                                          $"is defined but the Application Insights Extension is not installed. Please install the Application Insights Extension. " +
-                                                          $"See https://aka.ms/func-applicationinsights-extension for more details.");
-                }
-            }
-        }
-
-        internal static bool IsApplicationInsightsSettingPresent(IEnvironment environment)
-        {
-            return !string.IsNullOrEmpty(environment.GetEnvironmentVariable(EnvironmentSettingNames.AppInsightsConnectionString))
-                      || !string.IsNullOrEmpty(environment.GetEnvironmentVariable(EnvironmentSettingNames.AppInsightsInstrumentationKey));
         }
 
         private class TypeNameEqualityComparer : IEqualityComparer<Type>

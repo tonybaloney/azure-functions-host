@@ -432,7 +432,7 @@ namespace Microsoft.Azure.WebJobs.Script.Tests.Workers.Rpc
         {
             _testFunctionRpcService.PublishInvocationResponseEvent();
             var traces = _logger.GetLogMessages();
-            Assert.True(traces.Any(m => string.Equals(m.FormattedMessage, "InvocationResponse received for invocation id: TestInvocationId")));
+            Assert.True(traces.Any(m => string.Equals(m.FormattedMessage, "InvocationResponse received for invocation id: 'TestInvocationId'")));
         }
 
         [Fact]
@@ -443,19 +443,31 @@ namespace Microsoft.Azure.WebJobs.Script.Tests.Workers.Rpc
             _workerChannel.SendFunctionLoadRequests(null, TimeSpan.FromMinutes(5));
             _testFunctionRpcService.PublishFunctionLoadResponseEvent("TestFunctionId1");
             var traces = _logger.GetLogMessages();
-            Assert.True(traces.Any(m => string.Equals(m.FormattedMessage, "Setting up FunctionInvocationBuffer for function:js1 with functionId:TestFunctionId1")));
-            Assert.True(traces.Any(m => string.Equals(m.FormattedMessage, "Setting up FunctionInvocationBuffer for function:js2 with functionId:TestFunctionId2")));
-            Assert.True(traces.Any(m => string.Equals(m.FormattedMessage, "Received FunctionLoadResponse for functionId:TestFunctionId1")));
+            Assert.True(traces.Any(m => string.Equals(m.FormattedMessage, "Setting up FunctionInvocationBuffer for function: 'js1' with functionId: 'TestFunctionId1'")));
+            Assert.True(traces.Any(m => string.Equals(m.FormattedMessage, "Setting up FunctionInvocationBuffer for function: 'js2' with functionId: 'TestFunctionId2'")));
+            Assert.True(traces.Any(m => string.Equals(m.FormattedMessage, "Received FunctionLoadResponse for function: 'js1' with functionId: 'TestFunctionId1'.")));
         }
 
         [Fact]
-        public void ReceivesInboundEvent_WorkerMetadataResponse()
+        public void ReceivesInboundEvent_Successful_FunctionMetadataResponses()
         {
             var functionMetadata = GetTestFunctionsList("python");
-            var functions = _workerChannel.WorkerGetFunctionMetadata();
-            _testFunctionRpcService.PublishWorkerMetadataResponse("TestFunctionId1", functionMetadata);
+            var functions = _workerChannel.GetFunctionMetadata();
+            var functionId = "id123";
+            _testFunctionRpcService.PublishWorkerMetadataResponse("TestFunctionId1", functionId, functionMetadata, true);
             var traces = _logger.GetLogMessages();
             Assert.True(traces.Any(m => string.Equals(m.FormattedMessage, $"Received the worker function metadata response from worker {_workerChannel.Id}")));
+        }
+
+        [Fact]
+        public void ReceivesInboundEvent_Failed_FunctionMetadataResponses()
+        {
+            var functionMetadata = GetTestFunctionsList("python");
+            var functions = _workerChannel.GetFunctionMetadata();
+            var functionId = "id123";
+            _testFunctionRpcService.PublishWorkerMetadataResponse("TestFunctionId1", functionId, functionMetadata, false);
+            var traces = _logger.GetLogMessages();
+            Assert.True(traces.Any(m => string.Equals(m.FormattedMessage, $"Worker failed to index function {functionId}")));
         }
 
         [Fact]

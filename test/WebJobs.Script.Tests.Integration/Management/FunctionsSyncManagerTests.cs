@@ -25,6 +25,7 @@ using Moq;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Xunit;
+using static Microsoft.Azure.WebJobs.Script.Tests.TestHelpers;
 
 namespace Microsoft.Azure.WebJobs.Script.Tests.Managment
 {
@@ -45,6 +46,7 @@ namespace Microsoft.Azure.WebJobs.Script.Tests.Managment
         private readonly Mock<IScriptWebHostEnvironment> _mockWebHostEnvironment;
         private readonly Mock<IEnvironment> _mockEnvironment;
         private readonly HostNameProvider _hostNameProvider;
+        private readonly TestScriptHostService _scriptHostManager; // To refresh underlying IConfiguration for IAzureBlobStorageProvider
         private string _function1;
         private bool _emptyContent;
 
@@ -56,11 +58,11 @@ namespace Microsoft.Azure.WebJobs.Script.Tests.Managment
 
             _hostOptions = new ScriptApplicationHostOptions
             {
-                ScriptPath = @"x:\root",
+                ScriptPath = Path.Combine("x:", "root"),
                 IsSelfHost = false,
-                LogPath = @"x:\tmp\log",
-                SecretsPath = @"x:\secrets",
-                TestDataPath = @"x:\sampledata"
+                LogPath = Path.Combine("x:", "tmp", "log"),
+                SecretsPath = Path.Combine("x:", "secrets"),
+                TestDataPath = Path.Combine("x:", "sampledata")
             };
 
             var jobHostOptions = new ScriptJobHostOptions
@@ -132,9 +134,11 @@ namespace Microsoft.Azure.WebJobs.Script.Tests.Managment
 
             var functionMetadataProvider = new HostFunctionMetadataProvider(optionsMonitor, NullLogger<HostFunctionMetadataProvider>.Instance, new TestMetricsLogger());
             var functionMetadataManager = TestFunctionMetadataManager.GetFunctionMetadataManager(new OptionsWrapper<ScriptJobHostOptions>(jobHostOptions), functionMetadataProvider, null, new OptionsWrapper<HttpWorkerOptions>(new HttpWorkerOptions()), loggerFactory, new OptionsWrapper<LanguageWorkerOptions>(CreateLanguageWorkerConfigSettings()));
-            var azureStorageProvider = TestHelpers.GetAzureStorageProvider(configuration);
 
-            _functionsSyncManager = new FunctionsSyncManager(configuration, hostIdProviderMock.Object, optionsMonitor, loggerFactory.CreateLogger<FunctionsSyncManager>(), httpClientFactory, secretManagerProviderMock.Object, _mockWebHostEnvironment.Object, _mockEnvironment.Object, _hostNameProvider, functionMetadataManager, azureStorageProvider);
+            _scriptHostManager = new TestScriptHostService(configuration);
+            var azureBlobStorageProvider = TestHelpers.GetAzureBlobStorageProvider(configuration, scriptHostManager: _scriptHostManager);
+
+            _functionsSyncManager = new FunctionsSyncManager(configuration, hostIdProviderMock.Object, optionsMonitor, loggerFactory.CreateLogger<FunctionsSyncManager>(), httpClientFactory, secretManagerProviderMock.Object, _mockWebHostEnvironment.Object, _mockEnvironment.Object, _hostNameProvider, functionMetadataManager, azureBlobStorageProvider);
         }
 
         private string GetExpectedSyncTriggersPayload(string postedConnection = DefaultTestConnection, string postedTaskHub = DefaultTestTaskHub)
@@ -655,6 +659,16 @@ namespace Microsoft.Azure.WebJobs.Script.Tests.Managment
             _vars.Add("AzureWebJobsStorage", storageConnectionString);
             using (var env = new TestScopedEnvironmentVariable(_vars))
             {
+                // _functionsSyncManager is initialized in the constructor with all the secrets from environment,
+                // so HostAzureBlobStorageProvider will have AzureWebJobsStorage defined in both ActiveHostConfigurationSource
+                // and the WebHost IConfiguration source from DI.
+                // The TestScopedEnvironmentVariable only changes the WebHost level IConfiguration (so if it is overriden to
+                // "notaconnectionstring" the test behaves as expected.
+                // When it is set to empty, the connection string from the ActiveHostConfigurationSource wins (never changed since it is set in
+                // constructor as mentioned).
+                // Therefore, we need to force refresh the configuration with an ActiveHostChanged event. This is because setting an empty environment variable
+                // removes it, but will not remove it from the ActiveHostConfigurationSource.
+                _scriptHostManager.OnActiveHostChanged();
                 var blob = await _functionsSyncManager.GetHashBlobAsync();
                 Assert.Null(blob);
             }

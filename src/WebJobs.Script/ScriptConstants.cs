@@ -106,6 +106,7 @@ namespace Microsoft.Azure.WebJobs.Script
         public const string FeatureFlagRelaxedAssemblyUnification = "RelaxedAssemblyUnification";
         public const string FeatureFlagEnableDiagnosticEventLogging = "EnableDiagnosticEventLogging";
         public const string FeatureFlagDisableMergedWebHostScriptHostConfiguration = "DisableMergedConfiguration";
+        public const string FeatureFlagEnableWorkerIndexing = "EnableWorkerIndexing";
 
         public const string AdminJwtValidAudienceFormat = "https://{0}.azurewebsites.net/azurefunctions";
         public const string AdminJwtValidIssuerFormat = "https://{0}.scm.azurewebsites.net";
@@ -132,10 +133,11 @@ namespace Microsoft.Azure.WebJobs.Script
         public const int MaxTestDataInlineStringLength = 4 * 1024;
 
         public const string ExtensionsProjectFileName = "extensions.csproj";
-        public const string MetadataGeneratorPackageId = "Microsoft.Azure.WebJobs.Script.ExtensionsMetadataGenerator";
-        public const string MetadataGeneratorPackageVersion = "1.1.*";
+        public const string ItemGroupElementName = "ItemGroup";
         public const string PackageReferenceElementName = "PackageReference";
         public const string PackageReferenceVersionElementName = "Version";
+        public const string PackageReferenceIncludeElementName = "Include";
+
         public const int HostTimeoutSeconds = 30;
         public const int HostPollingIntervalMilliseconds = 25;
         public const int MaximumSecretBackupCount = 10;
