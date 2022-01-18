@@ -402,6 +402,7 @@ namespace Microsoft.Azure.WebJobs.Script
                 builder.Services.AddSingleton<ISdkVersionProvider, FunctionsSdkVersionProvider>();
 
                 builder.Services.AddSingleton<ITelemetryInitializer, ScriptTelemetryInitializer>();
+                builder.Services.AddSingleton<ILoggerProvider, ApplicationInsightsLoggerProvider>();
 
                 if (SystemEnvironment.Instance.IsPlaceholderModeEnabled())
                 {
